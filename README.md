@@ -2,7 +2,8 @@
 
 **A per-agent, per-step controller that switches between A\*, a PPO policy, and intelligent deadlock escape -trained on 32×32 grids, scaling zero-shot to 64×64 maps with 500 agents.**
 
-**Authors:** Roei Aviv · Omer Ben Simon
+**Authors:** Roei Aviv 314753427 · Omer Ben Simon 323023010
+ןג
 Afeka Tel Aviv Academic College of Engineering.
 
 **Interactive results site:** [omerbentzi.github.io/mapf-adaptive-switching](https://omerbentzi.github.io/mapf-adaptive-switching/)
