@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deadlock-Aware Adaptive Switching for MAPF</title>
+<meta name="description" content="Course project: a deadlock-aware, per-agent switching controller combining A*, a PPO-trained RL policy, and an intelligent escape mode for partially observable multi-agent pathfinding — scaling zero-shot from 32×32 training maps to 500 agents on 64×64 grids.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='13' height='13' rx='3' fill='%232a78d6'/%3E%3Crect x='17' y='2' width='13' height='13' rx='3' fill='%23eda100'/%3E%3Crect x='2' y='17' width='13' height='13' rx='3' fill='%231baf7a'/%3E%3Crect x='17' y='17' width='13' height='13' rx='3' fill='%23eb6834'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#fcfcfb; --card:#ffffff; --card2:#f6f6f3;
+  --ink:#1d2733; --ink-soft:#3b4654; --muted:#66707d;
+  --border:#e5e5e0; --grid:#ececea;
+  --accent:#2a78d6; --accent-ink:#ffffff; --obst:#c9c9c2;
+  --code-bg:#22272e; --code-ink:#d9dee5;
+  --fig-bg:#fff; /* backing for matplotlib PNGs — deliberately white in both themes */
+  --s1:#2a78d6; --s2:#008300; --s3:#e87ba4; --s4:#eda100;
+  --s5:#1baf7a; --s6:#eb6834; --s7:#4a3aa7;
+  --mA:var(--s1); --mR:var(--s3); --mE:var(--s4);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#1e1e1c; --card:#262623; --card2:#2b2b28;
+    --ink:#ecebe6; --ink-soft:#cfccc5; --muted:#a3a099;
+    --border:#3a3a35; --grid:#31312d;
+    --accent:#5b9be6; --accent-ink:#10233a; --obst:#4a4a44;
+    --code-bg:#191c21; --code-ink:#ccd2da;
+    --fig-bg:#fff; /* kept white: the figures are opaque white matplotlib exports */
+    --s1:#3b86e4; --s2:#3b9736; --s3:#d16790; --s4:#ca8000;
+    --s5:#00a36e; --s6:#da6436; --s7:#7169d4;
+  }
+}
+*{box-sizing:border-box}
+@media (prefers-reduced-motion: no-preference){ html{scroll-behavior:smooth} }
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  font-size:16.5px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1100px; margin:0 auto; padding:0 24px}
+a{color:var(--accent); text-decoration:none}
+a:hover{text-decoration:underline}
+h1,h2,h3{line-height:1.2; margin:0 0 .5em}
+h2{font-size:1.75rem; letter-spacing:-.01em}
+h3{font-size:1.12rem}
+p{margin:.4em 0 1em}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em; background:var(--card2); border:1px solid var(--border); border-radius:5px; padding:.08em .35em}
+section{padding:64px 0 8px}
+.eyebrow{
+  font-size:.78rem; font-weight:700; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--accent); margin-bottom:.7em;
+}
+.lede{font-size:1.08rem; color:var(--ink-soft); max-width:62ch}
+.muted{color:var(--muted)}
+.small{font-size:.88rem}
+
+/* ---------- hero ---------- */
+header.hero{padding:72px 0 40px; border-bottom:1px solid var(--border)}
+.hero h1{font-size:clamp(1.9rem, 4.4vw, 3.1rem); letter-spacing:-.02em; max-width:20ch}
+.hero .tagline{font-size:1.18rem; color:var(--ink-soft); max-width:58ch; margin-top:.6em}
+.hero .authors{margin-top:1.1em; font-weight:600}
+.hero .course{color:var(--muted); font-size:.95rem; margin-top:.15em}
+.btns{display:flex; gap:12px; flex-wrap:wrap; margin-top:1.6em}
+.btn{
+  display:inline-flex; align-items:center; gap:.5em;
+  padding:.62em 1.25em; border-radius:9px; font-weight:600; font-size:.98rem;
+  border:1.5px solid var(--accent); transition:transform .12s ease;
+}
+.btn:hover{text-decoration:none; transform:translateY(-1px)}
+.btn.primary{background:var(--accent); color:var(--accent-ink)}
+.btn.ghost{color:var(--accent); background:transparent}
+.stats{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:14px; margin-top:2.4em;
+}
+.stat{
+  background:var(--card); border:1px solid var(--border); border-radius:12px;
+  padding:18px 20px 14px; border-top:3px solid var(--accent);
+}
+.stat .num{font-size:1.85rem; font-weight:750; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+.stat .lbl{color:var(--muted); font-size:.86rem; line-height:1.4; margin-top:2px}
+
+/* ---------- animated grid ---------- */
+.simcard{
+  margin-top:2.6em; background:var(--card); border:1px solid var(--border);
+  border-radius:14px; padding:14px 14px 8px;
+}
+#sim{display:block; width:100%; height:auto}
+.simcap{color:var(--muted); font-size:.84rem; text-align:center; padding:8px 6px 6px}
+
+/* ---------- mode cards & flow ---------- */
+.modes{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; margin:1.4em 0}
+.mode{
+  background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px 22px 14px;
+}
+.mode .dot{width:12px;height:12px;border-radius:4px;display:inline-block;margin-right:.55em;vertical-align:-1px}
+.mode h3{display:flex;align-items:center}
+.mode .when{font-size:.8rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:.4em}
+.flow{
+  display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin:1.6em 0 1em;
+  background:var(--card2); border:1px solid var(--border); border-radius:12px; padding:18px 16px;
+}
+.flow .step{flex:1 1 220px; min-width:210px; padding:4px 14px}
+.flow .q{font-weight:650; font-size:.95rem}
+.flow .a{font-size:.88rem; color:var(--muted); margin-top:.25em}
+.flow .then{display:inline-flex;align-items:center;gap:.45em;margin-top:.55em;font-weight:700;font-size:.9rem}
+.flow .then .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+.flow .arrow{
+  align-self:center; color:var(--muted); font-size:1.3rem; padding:0 6px; flex:0 0 auto;
+}
+@media (max-width:760px){ .flow .arrow{transform:rotate(90deg); width:100%; text-align:center; padding:2px 0} }
+
+/* ---------- charts ---------- */
+.chartcard{
+  background:var(--card); border:1px solid var(--border); border-radius:14px;
+  padding:20px 20px 12px; margin:1.5em 0;
+}
+.chartcard h3{margin-bottom:.15em}
+.chartcard .sub{color:var(--muted); font-size:.88rem; margin:0 0 .8em}
+.legend{display:flex; flex-wrap:wrap; gap:6px 18px; margin:.4em 0 .7em; padding:0; list-style:none}
+.legend li{display:inline-flex; align-items:center; gap:.5em; font-size:.85rem; color:var(--ink-soft); cursor:default}
+.chart-scroll{overflow-x:auto}
+.chart-scroll svg{min-width:620px; width:100%; height:auto; display:block}
+.chartnote{color:var(--muted); font-size:.85rem; margin:.7em 4px .4em}
+#tooltip{
+  position:fixed; z-index:50; pointer-events:none; display:none;
+  background:var(--ink); color:var(--bg); font-size:.82rem; font-weight:600;
+  padding:.45em .7em; border-radius:7px; max-width:260px; line-height:1.35;
+  box-shadow:0 4px 14px rgba(0,0,0,.25);
+}
+details.data{margin:.4em 4px 1em}
+details.data summary{cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600}
+.table-scroll{overflow-x:auto; margin-top:.6em}
+table{border-collapse:collapse; font-size:.86rem; min-width:560px; font-variant-numeric:tabular-nums}
+th,td{border:1px solid var(--border); padding:.38em .7em; text-align:right}
+th:first-child,td:first-child{text-align:left}
+thead th{background:var(--card2); font-weight:650}
+
+/* ---------- figures ---------- */
+figure{margin:1.4em 0; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px}
+figure img{max-width:100%; display:block; border-radius:8px; background:var(--fig-bg)}
+figcaption{color:var(--muted); font-size:.84rem; padding:10px 6px 2px; text-align:center}
+
+/* ---------- findings & callouts ---------- */
+.findings{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; margin:1.4em 0}
+.finding{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px 22px 12px}
+.finding .kicker{font-size:.78rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); margin-bottom:.4em}
+.callout{
+  border-left:4px solid var(--accent); background:var(--card2);
+  border-radius:0 10px 10px 0; padding:16px 20px; margin:1.5em 0;
+}
+.callout.caveat{border-left-color:var(--s4)}
+.callout p:last-child{margin-bottom:.3em}
+
+/* ---------- mode usage bars ---------- */
+.usage{margin:1.2em 0 .4em}
+.usage-row{margin:0 0 18px}
+.usage-head{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:5px}
+.usage-head .n{font-weight:700; font-variant-numeric:tabular-nums}
+.usage-head .ann{color:var(--muted); font-size:.82rem; font-variant-numeric:tabular-nums}
+.usage-bar{display:flex; gap:2px; height:24px}
+.usage-bar span{border-radius:4px; min-width:3px}
+
+/* ---------- rigor ---------- */
+.rigor{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; margin:1.4em 0}
+.rigor .cell{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px 20px 10px}
+
+/* ---------- quickstart ---------- */
+pre{
+  background:var(--code-bg); color:var(--code-ink); border-radius:12px;
+  padding:20px 22px; overflow-x:auto; font-size:.85rem; line-height:1.65;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; margin:1.2em 0;
+}
+pre .cm{color:#7d8894}
+
+/* ---------- footer ---------- */
+footer{border-top:1px solid var(--border); margin-top:70px; padding:36px 0 48px; color:var(--muted); font-size:.9rem}
+footer .ref{color:var(--ink-soft); max-width:70ch}
+footer .meta{margin-top:1.2em; display:flex; gap:8px 26px; flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Advanced Topics in AI · Afeka Tel Aviv Academic College of Engineering</div>
+    <h1>Deadlock-Aware Adaptive Switching for Multi-Agent Pathfinding</h1>
+    <p class="tagline">A per-agent, per-step controller that switches between classical A*, a PPO-trained RL policy, and an intelligent deadlock-escape mode — trained on 32×32 grids, evaluated zero-shot with up to 500 agents on 64×64 maps.</p>
+    <div class="authors">Roei Aviv · Omer Ben Simon</div>
+    <div class="course">Course project · MIT License</div>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/OmerBentzi/mapf-adaptive-switching">View on GitHub</a>
+      <a class="btn ghost" href="https://github.com/OmerBentzi/mapf-adaptive-switching/blob/main/RL_PROJECT_FINAL.ipynb">Open the notebook</a>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="num">99.6%</div><div class="lbl">individual success rate at 64 agents on 64×64 — zero-shot, best of 7 methods</div></div>
+      <div class="stat"><div class="num">500 agents</div><div class="lbl">largest zero-shot setting handled by a policy trained with at most 16 agents</div></div>
+      <div class="stat"><div class="num">p = 0.0001</div><div class="lbl">exact McNemar vs. the strongest baseline at 64 agents (17:1 discordant episodes)</div></div>
+      <div class="stat"><div class="num">17 tests</div><div class="lbl">pytest unit tests: observation alignment, A* optimality, deadlock detection, GAE, determinism</div></div>
+    </div>
+
+    <div class="simcard">
+      <canvas id="sim" width="960" height="540" aria-label="Animated illustration of agents navigating a grid toward their goals"></canvas>
+      <div class="simcap">Illustrative animation — a deterministic toy instance with collision-free paths, not the trained policy. Rings mark each agent's goal.</div>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<section id="problem">
+  <div class="wrap">
+    <div class="eyebrow">01 · The problem</div>
+    <h2>Pathfinding when nobody sees the map</h2>
+    <p class="lede">Multi-agent pathfinding (MAPF) under <strong>partial observability</strong>: each agent perceives only an <strong>11×11 egocentric window</strong> (observation radius r&nbsp;=&nbsp;5) — no global map, no communication, no central controller. An agent knows only its own goal coordinates.</p>
+    <p class="lede">The environment is POGEMA 1.4.0: grid worlds with 5 actions (stay / up / down / left / right), vertex and edge collisions blocked, and finish-and-vanish goal semantics. Under these constraints, pure planners freeze in congestion and pure learned policies oscillate — the interesting question is <em>when to use which</em>.</p>
+  </div>
+</section>
+
+<section id="method">
+  <div class="wrap">
+    <div class="eyebrow">02 · The method</div>
+    <h2>Three modes, one per-agent switching rule</h2>
+    <p class="lede">Building on <em>“When to Switch”</em> (Skrynnik et al., IEEE TNNLS 2024), which alternates between classical planning and RL, this project adds a third mode — <strong>intelligent deadlock escape</strong> — and an adaptive controller that picks a mode for <strong>every agent at every step</strong>:</p>
+
+    <div class="flow" aria-label="Per-agent per-step decision rule">
+      <div class="step">
+        <div class="q">1 · Is the agent deadlocked?</div>
+        <div class="a">DeadlockMonitor fires when the last 4 positions contain ≤ 2 distinct cells — catching both frozen agents and 2-cell livelocks.</div>
+        <div class="then"><span class="dot" style="background:var(--mE)"></span>Escape — random <em>safe</em> move, 3 steps</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="q">2 · Are other agents visible?</div>
+        <div class="a">Any agent inside the 11×11 field of view means interference is likely and learned behavior pays off.</div>
+        <div class="then"><span class="dot" style="background:var(--mR)"></span>RL — PPO policy</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="q">3 · Otherwise</div>
+        <div class="a">Alone in open space, optimal search is cheap and exact.</div>
+        <div class="then"><span class="dot" style="background:var(--mA)"></span>A* — on the agent's memory map</div>
+      </div>
+    </div>
+
+    <div class="modes">
+      <div class="mode">
+        <div class="when">Mode · on deadlock</div>
+        <h3><span class="dot" style="background:var(--mE)"></span>Escape</h3>
+        <p class="small">A random <em>safe</em> move — avoiding obstacles, visible agents, and stepping back — held for 3 steps. It breaks the symmetric stand-offs that trap both planners and policies.</p>
+      </div>
+      <div class="mode">
+        <div class="when">Mode · under interference</div>
+        <h3><span class="dot" style="background:var(--mR)"></span>RL</h3>
+        <p class="small">An actor-critic CNN trained with PPO on multi-agent interference. Radius-agnostic pooling means the network never sees the map size — the policy is map-size agnostic by construction.</p>
+      </div>
+      <div class="mode">
+        <div class="when">Mode · in the clear</div>
+        <h3><span class="dot" style="background:var(--mA)"></span>A*</h3>
+        <p class="small">Optimal and cheap on the agent's accumulated obstacle-memory map — unknown cells assumed free, replanning lazily as the map fills in.</p>
+      </div>
+    </div>
+
+    <p class="muted small">Training: 8,000 episodes on 32×32 grids (density 0.3, agent mix {4, 8, 16}, 256-step horizon) — about 1.5 hours on Apple silicon. PPO with GAE, minibatches, and proper truncation bootstrapping; reward is distance-progress shaping plus a goal bonus.</p>
+  </div>
+</section>
+
+<section id="results32">
+  <div class="wrap">
+    <div class="eyebrow">03 · Results at training scale</div>
+    <h2>32×32: switching beats every baseline</h2>
+    <p class="lede">Seven configurations, 100 paired episodes per agent count — every method runs the exact same instances. At 16/24/32 agents, switching beats the strongest baseline (A*&nbsp;+&nbsp;Escape) with exact McNemar p&nbsp;=&nbsp;0.012&nbsp;/&nbsp;0.0026&nbsp;/&nbsp;0.0005. The 24- and 32-agent settings are themselves zero-shot: training saw at most 16 agents.</p>
+
+    <div class="chartcard">
+      <h3>Complete success rate (CSR) by agent count</h3>
+      <p class="sub">32×32 grid · density 0.3 · r = 5 · 256 steps · 100 paired episodes — CSR is the fraction of episodes where <em>all</em> agents reach their goals</p>
+      <ul class="legend" id="legend32"></ul>
+      <div class="chart-scroll"><div id="chart32"></div></div>
+      <details class="data"><summary>Data table</summary><div class="table-scroll" id="table32"></div></details>
+    </div>
+
+    <div class="callout">
+      <p><strong>The learned policy is load-bearing.</strong> Replacing RL with a random policy inside the same switcher (the ablation) collapses — 89:0 discordant episodes at 32 agents. As congestion grows from 4 to 32 agents, the switcher's mode mix shifts from A* 74% → 14% and RL 23% → 73%.</p>
+      <p class="small muted">Honest trade-off: at 32 agents, makespan is +12 steps vs. A* + Escape (p = 0.02) — switching trades a little speed for far more completed episodes.</p>
+    </div>
+
+    <figure>
+      <img src="assets/results_32.png" alt="Evaluation figure for the 32×32 benchmark: success rates, makespan, and mode usage across the seven methods" loading="lazy">
+      <figcaption>Full 32×32 evaluation figure from <code>evaluate.py</code> (checkpoints/results.png).</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="results64">
+  <div class="wrap">
+    <div class="eyebrow">04 · Zero-shot scaling</div>
+    <h2>64×64, up to 500 agents — no retraining</h2>
+    <p class="lede">The 32×32-trained checkpoint, evaluated unchanged at the scale of the original paper (64×64 maps, up to 500 agents). 50 paired seeds per setting, 512-step horizon. Switching posts the best individual success rate (ISR) at every agent count.</p>
+
+    <div class="chartcard">
+      <h3>Individual success rate (ISR) by agent count</h3>
+      <p class="sub">64×64 grid · density 0.3 · r = 5 · 512 steps · 50 paired seeds — ISR is the fraction of agents that reach their goals</p>
+      <ul class="legend" id="legend64"></ul>
+      <div class="chart-scroll"><div id="chart64"></div></div>
+      <details class="data"><summary>Data table</summary><div class="table-scroll" id="table64"></div></details>
+    </div>
+
+    <div class="findings">
+      <div class="finding">
+        <div class="kicker">Finding 1</div>
+        <h3>Strongest at every scale</h3>
+        <p class="small">Switching has the best ISR at all four agent counts and is the only method with substantial complete-episode success at 256 agents — 26/50 episodes solved vs. 6/50 for the next best. CSR (solved/50): 47 / 40 / 26 / 2 vs. A* + Escape's 31 / 21 / 6 / 0.</p>
+      </div>
+      <div class="finding">
+        <div class="kicker">Finding 2</div>
+        <h3>Pure planning collapses in congestion</h3>
+        <p class="small">A* falls from 94% to 47% ISR at 500 agents, where roughly 17% of free cells are occupied. The switcher responds by design: its A* share drops to 1.4% of agent-steps at that density.</p>
+      </div>
+      <div class="finding">
+        <div class="kicker">Finding 3</div>
+        <h3>Sampling rescues the RL policy</h3>
+        <p class="small">Greedy action selection locks the RL policy into oscillations (≤ 43% ISR everywhere), while <em>sampling</em> from the same network holds 87.6% at 500 agents — stochasticity itself breaks ties.</p>
+      </div>
+    </div>
+
+    <p class="lede">Statistically: switching beats A* + Escape with McNemar p = 0.0001 at 64 agents (17:1), p = 0.0002 at 128 (22:3), and p &lt; 0.0001 at 256 (21:1). At 500 agents CSR saturates near zero for everyone (2:0, p = 0.5 — no power) and the signal is ISR: <strong>+48.5 points, p = 0.0001</strong>. At 128 agents the +0.5-point ISR difference is <em>not</em> significant (p = 0.22, a ceiling effect) — the significant test there is CSR.</p>
+
+    <div class="callout caveat">
+      <p><strong>Matching the paper's scale — with a caveat.</strong> This reproduces the original paper's headline finding at its own scale: their ASwitcher exceeds 80% success at 500 agents; our switcher reaches 91.9% ISR — zero-shot from a 32×32-trained model. But the paper's 500-agent instances are maze and warehouse maps from the MovingAI benchmark, while ours are uniform-random grids. We match the paper's <em>scale</em>, not its exact benchmark maps.</p>
+    </div>
+
+    <figure>
+      <img src="assets/results_64.png" alt="Evaluation figure for the 64×64 zero-shot benchmark: ISR, CSR, and mode usage for up to 500 agents" loading="lazy">
+      <figcaption>Full 64×64 zero-shot evaluation figure (checkpoints_64/results_64.png). Total compute: ~5 CPU-hours fanned out over parallel workers on an Apple M-series machine.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="usage">
+  <div class="wrap">
+    <div class="eyebrow">05 · Inside the switcher</div>
+    <h2>Where the steps go</h2>
+    <p class="lede">Share of agent-steps spent in each mode on 64×64 maps. As congestion grows, the controller drains A* and leans on RL — and the escape mode's share climbs steadily, from 10% to 26% of all steps.</p>
+
+    <div class="chartcard">
+      <h3>Switcher mode usage by agent count</h3>
+      <p class="sub">Percent of agent-steps per mode · 64×64 · 50 paired seeds</p>
+      <ul class="legend" id="legendUsage"></ul>
+      <div class="usage" id="usageBars"></div>
+    </div>
+  </div>
+</section>
+
+<section id="rigor">
+  <div class="wrap">
+    <div class="eyebrow">06 · Evaluation rigor</div>
+    <h2>Paired, exact, and unit-tested</h2>
+    <div class="rigor">
+      <div class="cell">
+        <h3>Paired seeds</h3>
+        <p class="small">Every method runs the exact same instances (seeds 90000+). The episode is the unit of analysis, so every comparison is a within-instance comparison.</p>
+      </div>
+      <div class="cell">
+        <h3>Exact McNemar</h3>
+        <p class="small">Complete-success comparisons use the exact McNemar test on discordant episode pairs — the right test for paired binary outcomes.</p>
+      </div>
+      <div class="cell">
+        <h3>Permutation + bootstrap</h3>
+        <p class="small">ISR differences use sign-flip permutation tests with bootstrap confidence intervals; proportions carry Wilson CIs.</p>
+      </div>
+      <div class="cell">
+        <h3>17 unit tests</h3>
+        <p class="small">pytest coverage of observation alignment, A* optimality, deadlock detection, a hand-checked GAE computation, determinism, and more.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="wrap">
+    <div class="eyebrow">07 · Quickstart</div>
+    <h2>Reproduce it</h2>
+<pre><span class="cm"># pinned dependencies</span>
+pip install "numpy&lt;2.0" "pydantic&lt;2.0" gymnasium==0.28.1 torch matplotlib pytest
+pip install pogema==1.4.0 --no-build-isolation
+
+<span class="cm"># run the 17 unit tests</span>
+python -m pytest tests -q
+
+<span class="cm"># train (resumable; ~1.5 h on Apple silicon)</span>
+MAX_HOURS=3.5 python train.py
+
+<span class="cm"># evaluate — 32×32, 100 paired episodes</span>
+EPISODES=100 AGENTS=4,8,16,24,32 python evaluate.py
+
+<span class="cm"># evaluate — 64×64 zero-shot, up to 500 agents</span>
+CKPT_DIR=checkpoints_64 MAP_SIZE=64 AGENTS=64,128,256,500 MAX_STEPS=512 EPISODES=50 SKIP_SWEEP=1 python evaluate.py</pre>
+    <p class="muted small">Training and evaluation are configured through environment variables (<code>SEED</code>, <code>AGENT_MIX</code>, <code>MAP_SIZE</code>, …); training is resumable from checkpoint.</p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="ref"><strong>Reference.</strong> Skrynnik A., Andreychuk A., Yakovlev K., Panov A. (2024). “When to Switch: Planning and Learning to Adapt in Multi-Agent Pathfinding.” <em>IEEE Transactions on Neural Networks and Learning Systems.</em> DOI <a href="https://doi.org/10.1109/TNNLS.2023.3303502">10.1109/TNNLS.2023.3303502</a></p>
+    <div class="meta">
+      <span>Roei Aviv · Omer Ben Simon</span>
+      <span>Advanced Topics in AI — Afeka Tel Aviv Academic College of Engineering</span>
+      <span>MIT License</span>
+      <span><a href="https://github.com/OmerBentzi/mapf-adaptive-switching">GitHub</a></span>
+    </div>
+  </div>
+</footer>
+
+<div id="tooltip" role="tooltip"></div>
+
+<script>
+(function(){
+"use strict";
+var SVGNS = "http://www.w3.org/2000/svg";
+
+/* ================= shared data ================= */
+var METHODS = ["A* Only","A* + Escape","RL Only","RL Only (sampled)","RL + Escape","Switching (A*/RL)","Switching (A*/random)"];
+var SLOTS   = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7"];
+var MARKERS = ["circle","square","triup","diamond","tridown","plus","x"];
+
+var CSR32 = [
+  [95,80,67,58,47],
+  [100,96,83,79,71],
+  [12,2,0,0,0],
+  [87,79,59,51,32],
+  [86,79,63,56,46],
+  [100,99,95,94,89],
+  [92,30,1,0,0]
+];
+var X32 = ["4","8","16","24","32"];
+
+var ISR64 = [
+  [94.2,96.4,93.8,46.9],
+  [98.4,98.6,93.8,43.4],
+  [43.1,39.5,34.9,23.8],
+  [95.7,95.3,94.3,87.6],
+  [96.6,96.5,95.3,90.4],
+  [99.6,99.1,97.7,91.9],
+  [24.2,8.7,6.0,5.6]
+];
+var X64 = ["64","128","256","500"];
+
+var USAGE = [
+  {n:"64",  a:24.7, r:65.1, e:10.2},
+  {n:"128", a:12.2, r:73.6, e:14.2},
+  {n:"256", a:5.1,  r:75.4, e:19.5},
+  {n:"500", a:1.4,  r:72.2, e:26.4}
+];
+
+/* ================= tooltip ================= */
+var tip = document.getElementById("tooltip");
+function showTip(text, ev){
+  tip.textContent = text;
+  tip.style.display = "block";
+  var x = ev.clientX + 14, y = ev.clientY + 14;
+  var r = tip.getBoundingClientRect();
+  if (x + r.width > window.innerWidth - 8)  x = ev.clientX - r.width - 12;
+  if (y + r.height > window.innerHeight - 8) y = ev.clientY - r.height - 12;
+  tip.style.left = x + "px";
+  tip.style.top = y + "px";
+}
+function hideTip(){ tip.style.display = "none"; }
+
+/* ================= svg helpers ================= */
+function el(tag, attrs, parent){
+  var e = document.createElementNS(SVGNS, tag);
+  for (var k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function marker(g, type, x, y, color, r){
+  var m;
+  switch(type){
+    case "square":
+      m = el("rect", {x:x-r, y:y-r, width:2*r, height:2*r, rx:1.5}, g); break;
+    case "triup":
+      m = el("path", {d:"M"+x+" "+(y-r-1)+" L"+(x+r+1)+" "+(y+r)+" L"+(x-r-1)+" "+(y+r)+" Z"}, g); break;
+    case "tridown":
+      m = el("path", {d:"M"+x+" "+(y+r+1)+" L"+(x+r+1)+" "+(y-r)+" L"+(x-r-1)+" "+(y-r)+" Z"}, g); break;
+    case "diamond":
+      m = el("path", {d:"M"+x+" "+(y-r-1)+" L"+(x+r+1)+" "+y+" L"+x+" "+(y+r+1)+" L"+(x-r-1)+" "+y+" Z"}, g); break;
+    case "plus":
+      m = el("path", {d:"M"+(x-r-1)+" "+y+" H"+(x+r+1)+" M"+x+" "+(y-r-1)+" V"+(y+r+1),
+        fill:"none", stroke:color, "stroke-width":2.6, "stroke-linecap":"round"}, g);
+      return m;
+    case "x":
+      var d = r*0.85;
+      m = el("path", {d:"M"+(x-d)+" "+(y-d)+" L"+(x+d)+" "+(y+d)+" M"+(x-d)+" "+(y+d)+" L"+(x+d)+" "+(y-d),
+        fill:"none", stroke:color, "stroke-width":2.6, "stroke-linecap":"round"}, g);
+      return m;
+    default:
+      m = el("circle", {cx:x, cy:y, r:r}, g);
+  }
+  m.setAttribute("fill", color);
+  m.setAttribute("stroke", "var(--card)");
+  m.setAttribute("stroke-width", "1.6");
+  return m;
+}
+function legendChip(slot, mtype){
+  var s = document.createElementNS(SVGNS, "svg");
+  s.setAttribute("width","30"); s.setAttribute("height","14"); s.setAttribute("viewBox","0 0 30 14");
+  s.setAttribute("aria-hidden","true");
+  var c = "var(" + slot + ")";
+  el("line", {x1:1, y1:7, x2:29, y2:7, stroke:c, "stroke-width":2}, s);
+  marker(s, mtype, 15, 7, c, 4);
+  return s;
+}
+
+/* ================= line chart ================= */
+function lineChart(containerId, legendId, tableId, xlabels, seriesValues, opts){
+  var container = document.getElementById(containerId);
+  var W = 940, H = 430;
+  var mL = 52, mR = 122, mT = 16, mB = 46;
+  var iw = W - mL - mR, ih = H - mT - mB;
+  var svg = el("svg", {viewBox:"0 0 "+W+" "+H, role:"img",
+    "aria-label": opts.aria});
+  container.appendChild(svg);
+
+  function px(i){ return mL + (xlabels.length === 1 ? iw/2 : i * iw / (xlabels.length - 1)); }
+  function py(v){ return mT + ih * (1 - v/100); }
+
+  // gridlines + y labels (0..100 step 25)
+  for (var gv = 0; gv <= 100; gv += 25){
+    el("line", {x1:mL, y1:py(gv), x2:W-mR, y2:py(gv), stroke:"var(--grid)", "stroke-width":1}, svg);
+    var t = el("text", {x:mL-10, y:py(gv)+4, "text-anchor":"end",
+      "font-size":12.5, fill:"var(--muted)"}, svg);
+    t.textContent = gv + "%";
+  }
+  // x labels
+  for (var i = 0; i < xlabels.length; i++){
+    var tx = el("text", {x:px(i), y:H-mB+22, "text-anchor":"middle",
+      "font-size":13, fill:"var(--muted)"}, svg);
+    tx.textContent = xlabels[i];
+  }
+  var ax = el("text", {x:mL+iw/2, y:H-6, "text-anchor":"middle",
+    "font-size":12, fill:"var(--muted)"}, svg);
+  ax.textContent = "agents per episode";
+
+  // series
+  var groups = [];
+  for (var s = 0; s < seriesValues.length; s++){
+    var color = "var(" + SLOTS[s] + ")";
+    var g = el("g", {"class":"series", "data-i":s}, svg);
+    g.style.transition = "opacity .15s ease";
+    groups.push(g);
+    var d = "";
+    for (var j = 0; j < seriesValues[s].length; j++){
+      d += (j ? " L" : "M") + px(j).toFixed(1) + " " + py(seriesValues[s][j]).toFixed(1);
+    }
+    el("path", {d:d, fill:"none", stroke:color, "stroke-width":2,
+      "stroke-linejoin":"round", "stroke-linecap":"round"}, g);
+    for (var j2 = 0; j2 < seriesValues[s].length; j2++){
+      marker(g, MARKERS[s], px(j2), py(seriesValues[s][j2]), color, 4.5);
+      // invisible hit target
+      var hit = el("circle", {cx:px(j2), cy:py(seriesValues[s][j2]), r:13,
+        fill:"transparent"}, g);
+      (function(name, xl, v, metric){
+        hit.addEventListener("mousemove", function(ev){
+          showTip(name + " — " + xl + " agents: " + v + "% " + metric, ev);
+        });
+        hit.addEventListener("mouseleave", hideTip);
+      })(METHODS[s], xlabels[j2], seriesValues[s][j2], opts.metric);
+    }
+    // direct labels
+    if (opts.direct && opts.direct[s] !== undefined){
+      var last = seriesValues[s][seriesValues[s].length-1];
+      var lt = el("text", {x:W-mR+12, y:py(last) + (opts.directDy && opts.directDy[s] || 4),
+        "font-size":13, "font-weight":650, fill:"var(--ink-soft)"}, g);
+      lt.textContent = opts.direct[s];
+    }
+  }
+
+  // legend
+  var legend = document.getElementById(legendId);
+  for (var li = 0; li < METHODS.length; li++){
+    var item = document.createElement("li");
+    item.appendChild(legendChip(SLOTS[li], MARKERS[li]));
+    item.appendChild(document.createTextNode(METHODS[li]));
+    item.tabIndex = 0;
+    (function(idx){
+      function highlight(){
+        groups.forEach(function(g,k){ g.style.opacity = (k === idx) ? 1 : 0.15; });
+      }
+      function clear(){
+        groups.forEach(function(g){ g.style.opacity = 1; });
+      }
+      item.addEventListener("mouseenter", highlight);
+      item.addEventListener("mouseleave", clear);
+      item.addEventListener("focus", highlight);
+      item.addEventListener("blur", clear);
+    })(li);
+    legend.appendChild(item);
+  }
+
+  // data table
+  if (tableId){
+    var tbl = document.createElement("table");
+    var thead = document.createElement("thead");
+    var hr = document.createElement("tr");
+    var th0 = document.createElement("th"); th0.textContent = "Method"; hr.appendChild(th0);
+    xlabels.forEach(function(x){
+      var th = document.createElement("th"); th.textContent = x + " agents"; hr.appendChild(th);
+    });
+    thead.appendChild(hr); tbl.appendChild(thead);
+    var tbody = document.createElement("tbody");
+    METHODS.forEach(function(m, mi){
+      var tr = document.createElement("tr");
+      var td0 = document.createElement("td"); td0.textContent = m; tr.appendChild(td0);
+      seriesValues[mi].forEach(function(v){
+        var td = document.createElement("td"); td.textContent = v + "%"; tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    document.getElementById(tableId).appendChild(tbl);
+  }
+}
+
+lineChart("chart32", "legend32", "table32", X32, CSR32, {
+  metric: "CSR",
+  aria: "Line chart of complete success rate by agent count on 32 by 32 maps for seven methods",
+  direct: {5:"Switching", 2:"RL Only"},
+  directDy: {5:4, 2:4}
+});
+lineChart("chart64", "legend64", "table64", X64, ISR64, {
+  metric: "ISR",
+  aria: "Line chart of individual success rate by agent count on 64 by 64 maps for seven methods, zero-shot",
+  direct: {5:"Switching", 2:"RL Only"},
+  directDy: {5:-4, 2:4}
+});
+
+/* ================= mode-usage stacked bars ================= */
+(function(){
+  var host = document.getElementById("usageBars");
+  var modes = [
+    {key:"a", name:"A*",     cssvar:"--mA"},
+    {key:"r", name:"RL",     cssvar:"--mR"},
+    {key:"e", name:"Escape", cssvar:"--mE"}
+  ];
+  var legend = document.getElementById("legendUsage");
+  modes.forEach(function(m){
+    var item = document.createElement("li");
+    var sw = document.createElement("span");
+    sw.style.cssText = "display:inline-block;width:12px;height:12px;border-radius:4px;background:var(" + m.cssvar + ")";
+    item.appendChild(sw);
+    item.appendChild(document.createTextNode(m.name + " mode"));
+    legend.appendChild(item);
+  });
+  USAGE.forEach(function(row){
+    var wrap = document.createElement("div"); wrap.className = "usage-row";
+    var head = document.createElement("div"); head.className = "usage-head";
+    var n = document.createElement("span"); n.className = "n";
+    n.textContent = row.n + " agents"; head.appendChild(n);
+    var ann = document.createElement("span"); ann.className = "ann";
+    ann.textContent = "A* " + row.a + "% · RL " + row.r + "% · Escape " + row.e + "%";
+    head.appendChild(ann);
+    wrap.appendChild(head);
+    var bar = document.createElement("div"); bar.className = "usage-bar";
+    bar.setAttribute("aria-hidden", "true"); // decorative — exact values are in the .ann text above
+    modes.forEach(function(m){
+      var seg = document.createElement("span");
+      var v = row[m.key];
+      seg.style.width = v + "%";
+      seg.style.background = "var(" + m.cssvar + ")";
+      seg.addEventListener("mousemove", function(ev){
+        showTip(m.name + " mode — " + v + "% of agent-steps at " + row.n + " agents", ev);
+      });
+      seg.addEventListener("mouseleave", hideTip);
+      bar.appendChild(seg);
+    });
+    wrap.appendChild(bar);
+    host.appendChild(wrap);
+  });
+})();
+
+/* ================= animated grid simulation ================= */
+(function(){
+  var canvas = document.getElementById("sim");
+  var ctx = canvas.getContext("2d");
+  var GW = 16, GH = 9;
+  var OBS = [[3,2],[3,3],[3,6],[5,1],[7,4],[7,5],[9,2],[9,7],[11,3],[12,6],[13,2],[6,7]];
+  var obsSet = {};
+  OBS.forEach(function(o){ obsSet[o[0] + "," + o[1]] = true; });
+  var AGENT_SLOTS = ["--s1","--s2","--s4","--s6","--s7"];
+  var baseAgents = [
+    {s:[0,1],  g:[15,7]},
+    {s:[15,2], g:[0,6]},
+    {s:[2,8],  g:[13,0]},
+    {s:[14,8], g:[1,0]},
+    {s:[8,0],  g:[8,8]}
+  ];
+  var T = 160;
+
+  function planPaths(agents){
+    var resV = {}, resE = {};
+    var paths = [];
+    agents.forEach(function(ag){
+      var stride = GW * GH;
+      var prev = {};
+      var q = [[ag.s[0], ag.s[1], 0]];
+      var startKey = ag.s[1]*GW + ag.s[0];
+      prev[startKey] = -2;
+      var head = 0, endState = null;
+      while (head < q.length){
+        var cur = q[head++]; var x = cur[0], y = cur[1], t = cur[2];
+        if (x === ag.g[0] && y === ag.g[1]){
+          // valid terminal only if goal free for all remaining time
+          var free = true;
+          for (var tt = t; tt <= T; tt++){ if (resV[x + "," + y + "," + tt]){ free = false; break; } }
+          if (free){ endState = [x, y, t]; break; }
+        }
+        if (t >= T) continue;
+        var moves = [[0,0],[1,0],[-1,0],[0,1],[0,-1]];
+        for (var mi = 0; mi < 5; mi++){
+          var nx = x + moves[mi][0], ny = y + moves[mi][1];
+          if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
+          if (obsSet[nx + "," + ny]) continue;
+          if (resV[nx + "," + ny + "," + (t+1)]) continue;
+          if (resE[nx + "," + ny + "," + x + "," + y + "," + t]) continue;
+          var k = (t+1) * stride + ny*GW + nx;
+          if (prev[k] !== undefined) continue;
+          prev[k] = t * stride + y*GW + x;
+          q.push([nx, ny, t+1]);
+        }
+      }
+      var path = [];
+      if (!endState){
+        path = [[ag.s[0], ag.s[1]]];
+      } else {
+        var k2 = endState[2] * stride + endState[1]*GW + endState[0];
+        while (k2 !== -2){
+          var rem = k2 % stride;
+          path.unshift([rem % GW, Math.floor(rem / GW)]);
+          k2 = prev[k2];
+        }
+      }
+      // reserve
+      for (var pi = 0; pi < path.length; pi++){
+        resV[path[pi][0] + "," + path[pi][1] + "," + pi] = true;
+        if (pi > 0){
+          resE[path[pi-1][0] + "," + path[pi-1][1] + "," + path[pi][0] + "," + path[pi][1] + "," + (pi-1)] = true;
+        }
+      }
+      var gx = path[path.length-1][0], gy = path[path.length-1][1];
+      for (var tg = path.length-1; tg <= T; tg++) resV[gx + "," + gy + "," + tg] = true;
+      paths.push(path);
+    });
+    var maxLen = 1;
+    paths.forEach(function(p){ if (p.length > maxLen) maxLen = p.length; });
+    paths.forEach(function(p){ var last = p[p.length-1]; while (p.length < maxLen) p.push(last); });
+    return paths;
+  }
+
+  var agents = baseAgents.map(function(a){ return {s:a.s.slice(), g:a.g.slice()}; });
+  var paths = planPaths(agents);
+  var goals = agents.map(function(a){ return a.g.slice(); });
+
+  var colors = [], obstColor = "", gridColor = "";
+  function refreshColors(){
+    var cs = getComputedStyle(document.documentElement);
+    colors = AGENT_SLOTS.map(function(v){ return cs.getPropertyValue(v).trim(); });
+    obstColor = cs.getPropertyValue("--obst").trim();
+    gridColor = cs.getPropertyValue("--grid").trim();
+  }
+  refreshColors();
+  var darkMq = window.matchMedia("(prefers-color-scheme: dark)");
+  if (darkMq.addEventListener) darkMq.addEventListener("change", function(){ refreshColors(); drawStaticIfReduced(); });
+
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  function sizeCanvas(){
+    var pcs = getComputedStyle(canvas.parentElement);
+    var w = canvas.parentElement.clientWidth
+      - parseFloat(pcs.paddingLeft) - parseFloat(pcs.paddingRight);
+    var h = Math.round(w * GH / GW);
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  sizeCanvas();
+  window.addEventListener("resize", function(){ sizeCanvas(); drawStaticIfReduced(); });
+
+  function easeInOut(u){ return u < 0.5 ? 4*u*u*u : 1 - Math.pow(-2*u + 2, 3)/2; }
+  function rr(x, y, w, h, r){
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);
+    ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+  }
+
+  function draw(stepIdx, frac){
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    var pad = 6 * dpr;
+    var cell = Math.min((w - 2*pad) / GW, (h - 2*pad) / GH);
+    var ox = (w - cell*GW)/2, oy = (h - cell*GH)/2;
+
+    // grid dots
+    ctx.fillStyle = gridColor;
+    for (var gx = 0; gx <= GW; gx++){
+      for (var gy = 0; gy <= GH; gy++){
+        ctx.fillRect(ox + gx*cell - dpr*0.75, oy + gy*cell - dpr*0.75, dpr*1.5, dpr*1.5);
+      }
+    }
+    // obstacles
+    ctx.fillStyle = obstColor;
+    OBS.forEach(function(o){
+      rr(ox + o[0]*cell + cell*0.1, oy + o[1]*cell + cell*0.1, cell*0.8, cell*0.8, cell*0.16);
+      ctx.fill();
+    });
+    // goals
+    goals.forEach(function(g, i){
+      ctx.strokeStyle = colors[i];
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = 2 * dpr;
+      rr(ox + g[0]*cell + cell*0.22, oy + g[1]*cell + cell*0.22, cell*0.56, cell*0.56, cell*0.14);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+    // agents
+    var u = easeInOut(Math.max(0, Math.min(1, frac)));
+    paths.forEach(function(p, i){
+      var a = p[Math.min(stepIdx, p.length-1)];
+      var b = p[Math.min(stepIdx+1, p.length-1)];
+      var x = a[0] + (b[0]-a[0])*u, y = a[1] + (b[1]-a[1])*u;
+      ctx.fillStyle = colors[i];
+      rr(ox + x*cell + cell*0.16, oy + y*cell + cell*0.16, cell*0.68, cell*0.68, cell*0.2);
+      ctx.fill();
+    });
+  }
+
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+  function drawStaticIfReduced(){
+    if (reduced.matches) draw(0, 0);
+  }
+
+  var started = false;
+  if (reduced.addEventListener) reduced.addEventListener("change", start);
+  if (reduced.matches){
+    draw(0, 0);
+  } else {
+    start();
+  }
+
+  function start(){
+    if (started || reduced.matches){ drawStaticIfReduced(); return; }
+    started = true;
+    var STEP_MS = 400, HOLD_MS = 1500;
+    var cycleStart = null;
+    function frame(now){
+      if (reduced.matches){ started = false; draw(0, 0); return; }
+      if (document.hidden){ requestAnimationFrame(frame); return; }
+      if (cycleStart === null) cycleStart = now;
+      var elapsed = now - cycleStart;
+      var L = paths[0].length;
+      var travelMs = (L - 1) * STEP_MS;
+      if (elapsed >= travelMs + HOLD_MS){
+        // swap starts and goals, replan, next cycle
+        agents = agents.map(function(a){ return {s:a.g.slice(), g:a.s.slice()}; });
+        paths = planPaths(agents);
+        goals = agents.map(function(a){ return a.g.slice(); });
+        cycleStart = now;
+        elapsed = 0;
+      }
+      var sf = Math.min(elapsed / STEP_MS, L - 1);
+      draw(Math.floor(sf), sf - Math.floor(sf));
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+})();
+
+})();
+</script>
+</body>
+</html>

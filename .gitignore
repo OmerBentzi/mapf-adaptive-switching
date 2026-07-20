@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# local tooling / editor state
+.claude/
+.DS_Store
+.ipynb_checkpoints/
+
+# heavy training-resume state and local session logs — the published artifact
+# is checkpoints/best_model.pt; re-run train.py to regenerate these
+checkpoints/checkpoint.pt
+checkpoints/run.log
